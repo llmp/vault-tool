@@ -1,0 +1,4 @@
+libkeepass
+requests
+hvac
+pyyaml
