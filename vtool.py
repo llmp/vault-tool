@@ -46,8 +46,6 @@ def initialize_vault_data():
     global kps_file
     global secret_name
     print('[+INFO] Limpando e inicializando variáveis de ambiente...') if verbose_mode else 0
-
-    print(vault_envs)
     
     secret_name = 'secret/'
 
@@ -57,43 +55,47 @@ def initialize_vault_data():
         vault_data[key]['secret_data'] = dict()
         vault_data[key]['use'] = False
 
-    print(vault_data)
+    print(vault_data) if verbose_mode else 0
 
-def print_formatted_secret_data(data):
-    print('\n')
-    for key, value in data.items():
-        print("\t" + key + " : " + value)
+def clear_cache():
+    initialize_vault_data()
+    main()
 
 def get_vault_tokens(vault_names):
         global kps_file
         kps_passwd = getpass.getpass('\nInforme a senha do KeePass:')
         print("""\n==================================================================
 [INFO] - Autenticando e buscando chave(s), aguarde...""")
-        
-        for name in vault_names:
-            print('[+INFO] Executando busca para ' + name ) if verbose_mode else 0
+        try:
+            for name in vault_names:
+                print('[+INFO] Executando busca para ' + name ) if verbose_mode else 0
 
-            try:
-                with libkeepass.open(kps_file, password=kps_passwd) as kdb:
-                    found = {}
-                    for entry in kdb.obj_root.findall('.//Group/Entry'):
-                        uuid = entry.find('./UUID').text
-                        kv = {string.find('./Key').text : string.find('./Value').text for string in entry.findall('./String')}
-                        if kv['Title'] == name:
-                            found[uuid] = kv['Password']
+                try:
+                    with libkeepass.open(kps_file, password=kps_passwd) as kdb:
+                        found = {}
+                        for entry in kdb.obj_root.findall('.//Group/Entry'):
+                            uuid = entry.find('./UUID').text
+                            kv = {string.find('./Key').text : string.find('./Value').text for string in entry.findall('./String')}
+                            if kv['Title'] == name:
+                                found[uuid] = kv['Password']
 
-                    removed_uuids = {uuid.text for uuid in kdb.obj_root.findall('.//DeletedObject/UUID')}
+                        removed_uuids = {uuid.text for uuid in kdb.obj_root.findall('.//DeletedObject/UUID')}
 
-                for password in { found[k] for k in found.keys() if k not in removed_uuids }:
-                    vault_data[name]['token'] = password
-                    vault_data[name]['use'] = True
-                    print('[+INFO] Busca de chave concluída...') if verbose_mode else 0
-            except Exception as e:
-                print('[ERRO] - Erro ao conectar ao Keepass %s:\n%s' % (kps_file, str(e)), file=sys.stderr)
-                
-        print("""[INFO] - Chave(s) de ambiente obtida(s)!
-==================================================================
-""")
+                    for password in { found[k] for k in found.keys() if k not in removed_uuids }:
+                        vault_data[name]['token'] = password
+                        vault_data[name]['use'] = True
+                        print('[+INFO] Busca de chave concluída...') if verbose_mode else 0
+                except Exception as e:
+                    print('[ERRO] - Erro ao conectar ao Keepass %s:\n%s' % (kps_file, str(e)), file=sys.stderr)
+                    raise(e)
+                    
+            print("""[INFO] - Chave(s) de ambiente obtida(s)!
+    ==================================================================
+    """)
+        except Exception as e:
+            print('[ERRO] - Não foi possível autenticar com a senha informada')
+            raise(e)
+
 
 def insert_vault_tokens(vault_names):
     for name in vault_names:
@@ -105,18 +107,19 @@ def insert_vault_tokens(vault_names):
 
 def get_secret_name():
     global secret_name  
-    print(""""""+clear+"""# ====================== PASSO 3 =========================== #\n
+    print(""""""+clear+"""==============================================================\n
     Informe o nome da secret a ser criada\n""")
     secret_name += quote(input('Informe o nome da secret: '))
     print('\n[INFO] - O nome da secret a ser criada é: ' + secret_name)
-    
+
+
 def get_policies():
     redo = True
     policies = []
     while redo:
         print("""\
-"""+clear+"""# ====================== PASSO 5 =========================== #\n
-    Informe uma policy para ser adicionada na criação do token:\n
+"""+clear+"""==============================================================\n
+    Informe uma policy para ser adicionada ao token:\n
            Digite 1 para leitura da secret (default)
            Digite 2 para acesso ao S3 (Amazon)
            Digite 3 para acesso ao Dynamo (Amazon)
@@ -126,7 +129,7 @@ def get_policies():
            Policies já adicionadas: """ + ', '.join(policies) + """
 """)
 
-        opt = get_numeric(0,5)
+        opt = get_option(0,5)
         print('[INFO] - Opção ' + str(opt) + ' selecionada') if verbose_mode else 0
         if opt == 0:
             sys.exit(0)
@@ -160,171 +163,12 @@ def get_policies():
         
     return policies
 
-def create_secret(targets):
-    global vault_data
-    global secret_name
-    
-    if kps_file != '': 
-        get_token_input_method(targets)
-    else:
-        insert_vault_tokens(targets)
-
-    get_secret_name()
-    created = False
-
-    for environment_name, environment_data in vault_data.items():
-        if environment_data['use']:
-
-            client = hvac.Client(
-                url= vault_data[environment_name]['url'],
-                token=vault_data[environment_name]['token']
-            )
-
-            vault_data[environment_name]['secret_data'] = get_keys(environment_name)
-
-
-            print("""\n==================================================================
-[INFO] - As chaves da """ + secret_name + """ para o """ + environment_name +  """ serão:
-""")
-            
-            print_formatted_secret_data(vault_data[environment_name]['secret_data'])
-
-            if get_yes_or_no('\n\nOs dados estão corretos?'):
-                post_secret(vault_data[environment_name], secret_name, client)
-                policies = get_policies()
-                post_policy(vault_data[environment_name], secret_name, client, policies)
-                generate_token(vault_data[environment_name], secret_name, client)
-                created = True  
-            else:
-                print('\n[INFO] - OPERAÇÃO INTERROMPIDA PELO USUÁRIO!') if verbose_mode else 0
-            client.adapter.close()
-        
-    if created:
-        print_tokens()
-
-def update_secret(targets):
-    global vault_data
-    
-    if kps_file != '': 
-        get_token_input_method(targets)
-    else:
-        insert_vault_tokens(targets)
-
-    try:
-        for environment_name, environment_data in vault_data.items():
-            if environment_data['use']:
-                secret_name = input('Informe o nome da secret:')
-                secret = get_secret_details(environment_name, secret_name)
-                print("""\n\n==================================================================================================================
-    Durante a atualização dos pares (chave e valor) tanto o nome quanto o valor do campo poderão ser sobrescritos\n
-    Para inserir um par (chave e valor) novo, informe o nome de um campo não existente na secret
-==================================================================================================================\n\n""")
-
-                changes = dict()
-                redo = True
-                while redo:
-                    old_field_name = input('Informe o nome do campo a ser atualizado:')
-
-                    if get_yes_or_no('\nDeseja alterar o nome do campo?', 'n'):
-                        new_field_name = input('\nInforme o nome novo para o campo:')
-                    else:
-                        new_field_name = old_field_name
-
-                    new_field_value = input('\nInforme o valor novo do campo:')
-
-                    if get_yes_or_no('\nConfirmar atualização do campo?'):
-                        changes[old_field_name] = { 'new_name': new_field_name, 'new_value': new_field_value}
-                    
-                    redo = get_yes_or_no('\nDeseja atualizar mais alguma chave?','n')
-
-                for old_key, key_pair in changes.items():
-                    print('[DEBUG] - Iterando em ', old_key) if debug_mode else 0
-                    if old_key in secret['data']:
-                        if old_key == key_pair['new_name']:
-                            secret['data'][old_key] = key_pair['new_value']
-                        else:
-                            secret['data'].pop(old_key, None)
-                            secret['data'][key_pair['new_name']] = key_pair['new_value']
-                    else:
-                        secret['data'][key_pair['new_name']] = key_pair['new_value']
-                
-                environment_data['secret_data'] = secret['data']
-                print('[DEBUG] - DADOS DA ATUALIZAÇÃO') if debug_mode else 0
-                print(environment_data['secret_data']) if debug_mode else 0
-
-                client = hvac.Client(
-                    url= vault_data[environment_name]['url'],
-                    token=vault_data[environment_name]['token']
-                )
-
-                post_secret(environment_data, 'secret/' + secret['name'], client)
-                get_secret_details(environment_name, secret_name)
-                print('\n[INFO] - Atualização da secret concluída com sucesso!\n')
-    except Exception as err:
-        print('Falha ao executar comando no Vault:', err)
-                
-
-def list_secret(targets):
-    global vault_data
-    global kps_file
-
-    if kps_file != '': 
-        get_token_input_method(targets)
-    else:
-        insert_vault_tokens(targets)
-
-    try:
-        print(""""""+clear+"""\n=======================================================================
-                Listagem de secrets concluída """)
-        
-        for environment_name, environment_data in vault_data.items():
-            if environment_data['use']:
-                client = hvac.Client(
-                    url= vault_data[environment_name]['url'],
-                    token=vault_data[environment_name]['token']
-                )
-                print("\n[" + environment_name + "]\n")
-                for secret in client.list('secret/')['data']['keys']:
-                    try:
-                        print(secret)
-                    except Exception:
-                        print('Dados não encontrados...')
-                
-                if get_yes_or_no('\nDeseja visualizar detalhes de alguma secret de ' + environment_name + '?', 'n'):
-                    secret_name = input('Informe o nome da secret:')
-
-                    get_secret_details(environment_name, secret_name)
-                    print("\n\nPressione alguma tecla para continuar...")
-                    getpass.getpass(' ')
-                    print(clear)
-    except Exception as err:
-        print('Falha ao executar comando no Vault:', err)
-
-def get_secret_details(environment_name, secret_name):
-    client = hvac.Client(
-                url= vault_data[environment_name]['url'],
-                token=vault_data[environment_name]['token']
-            )
-            
-    try:
-        data = client.read('secret/'+secret_name)['data']
-        print(""""""+clear+"""====================================================
-                Dados da Secret
-====================================================
-
-    Os dados da secret """ + secret_name + """ são:""")
-        print_formatted_secret_data(data)
-        return {'name': secret_name, 'data' : data}
-    except Exception as err:
-        print('[ERRO] - Não foi possível realizar a consulta')
-        raise err
-
 
 def get_keys(environment_name):
     i = 1
     secret_keys_pairs = {}
     
-    print(""""""+clear+"""# ====================== PASSO 4 =========================== #\n
+    print(""""""+clear+"""==============================================================\n
 Informe agora os conjuntos de chaves e valores para o ambiente """ + environment_name + """\n""")
 
     while True:
@@ -347,10 +191,13 @@ Informe agora os conjuntos de chaves e valores para o ambiente """ + environment
     return secret_keys_pairs
 
 
-def get_numeric(range_min, range_max):
+def get_option(range_min, range_max):
     while True:
         try:
-            res = int(input('Opção: '))
+            res = input('Opção: ')
+            if res == 'clear_cache':
+                clear_cache()
+            res = (int(res))
             if res not in range(range_min, range_max):
                 raise ValueError('[ERRO]')
             break
@@ -378,6 +225,7 @@ def get_yes_or_no(question, default="s"):
             sys.stdout.write("[ERRO] - Por favor responda com 'sim' ou 'nao' "
                              "('s' ou 'n').\n")
 
+
 def get_token_input_method(vault_names):
     if all(vault_data[name]['token'] != '' for name in vault_names):
         for name in vault_names:
@@ -387,21 +235,238 @@ def get_token_input_method(vault_names):
     else:
         print("""\
         """+clear+"""
-# =========================== PASSO 2 ================================ #\n
+========================================================================\n
 É necessário o token do ambiente no Vault para realizar esta operação\n
     Digite 1 para buscar o token no KeePass
     Digite 2 para inserir o token manualmente\n""")
 
-        opt = get_numeric(1,3)
-        if opt == 1:
-            get_vault_tokens(vault_names)
-        elif opt == 2:
-            insert_vault_tokens(vault_names)
+        opt = get_option(1,3)
+        try:
+            if opt == 1:
+                get_vault_tokens(vault_names)
+            elif opt == 2:
+                insert_vault_tokens(vault_names)
+        except Exception as e:
+            raise(e)
+
+
+######### FACADE OPERATIONS #########
+
+def create_secret_facade(targets):
+    global vault_data
+    global secret_name
+    
+    try:
+        if kps_file != '': 
+            get_token_input_method(targets)
+        else:
+            insert_vault_tokens(targets)
+    except Exception as e:
+        print('[ERRO] - Falha na autenticação')
+
+    get_secret_name()
+    created = False
+
+    for environment_name, environment_data in vault_data.items():
+        if environment_data['use']:
+
+            client = hvac.Client(
+                url= vault_data[environment_name]['url'],
+                token=vault_data[environment_name]['token']
+            )
+
+            vault_data[environment_name]['secret_data'] = get_keys(environment_name)
+
+
+            print("""\n==================================================================
+[INFO] - As chaves da """ + secret_name + """ para o """ + environment_name +  """ serão:
+""")
+            
+            print_formatted_secret_data(environment_name, secret_name, vault_data[environment_name]['secret_data'])
+
+            if get_yes_or_no('\n\nOs dados estão corretos?'):
+                write_secret(vault_data[environment_name], secret_name, client)
+                policies = get_policies()
+                policy_write(vault_data[environment_name], secret_name, client, policies)
+                token_create(vault_data[environment_name], secret_name, client)
+                created = True  
+            else:
+                print('\n[INFO] - OPERAÇÃO INTERROMPIDA PELO USUÁRIO!') if verbose_mode else 0
+            client.adapter.close()
+        
+    if created:
+        print_tokens()
+
+
+def update_secret_facade(targets):
+    global vault_data
+    
+    try:
+        if kps_file != '': 
+            get_token_input_method(targets)
+        else:
+            insert_vault_tokens(targets)
+
+        try:
+            for environment_name, environment_data in vault_data.items():
+                if environment_data['use']:
+                    secret_name = input('Informe o nome da secret:')
+                    print(clear)
+
+                    secret = read_secret(environment_name, secret_name)                
+                    print_formatted_secret_data(environment_name, secret_name, secret['data'])
+                    policy_data = policy_read(environment_name, secret_name + '-policy')
+                    print_formatted_policy_data(secret_name + '-policy', policy_data)
+                    
+                    changes = dict()
+                    redo = True
+
+                    print("""\n==================================================================
+    Informe o tipo de atualização a ser realizado:
+
+        Digite 1 para atualizar um campo
+        Digite 2 para atualizar as policies
+        Digite 3 para remover um campo
+                    """)
+                    opt = get_option(1,4)
+
+                    client = hvac.Client(
+                        url= vault_data[environment_name]['url'],
+                        token=vault_data[environment_name]['token']
+                    )
+
+                    if opt == 1:
+                        print("""\n\n============================================================================================================
+    Durante a atualização das chaves e valores, tanto o nome quanto o valor do campo podem ser sobrescritos
+    Para inserir um par novo, informe o nome de um campo não existente na secret
+=============================================================================================================\n\n""")
+
+                        while redo:
+                            old_field_name = input('Informe o nome do campo a ser atualizado:')
+                            
+                            if old_field_name in secret['data']:
+                                if get_yes_or_no('\nDeseja alterar o nome do campo?', 'n'):
+                                    new_field_name = input('\nInforme o nome novo para o campo:')
+                                else:
+                                    new_field_name = old_field_name
+
+                            new_field_value = input('\nInforme o valor novo do campo:')
+
+                            if get_yes_or_no('\nConfirmar atualização?'):
+                                changes[old_field_name] = { 'new_name': new_field_name, 'new_value': new_field_value}
+                            
+                            redo = get_yes_or_no('\nDeseja atualizar mais alguma chave?','n')
+
+                        for old_key, key_pair in changes.items():
+                            print('[DEBUG] - Iterando em ', old_key) if debug_mode else 0
+                            if old_key in secret['data']:
+                                if old_key == key_pair['new_name']:
+                                    secret['data'][old_key] = key_pair['new_value']
+                                else:
+                                    secret['data'].pop(old_key, None)
+                                    secret['data'][key_pair['new_name']] = key_pair['new_value']
+                            else:
+                                secret['data'][key_pair['new_name']] = key_pair['new_value']
+                        
+                        environment_data['secret_data'] = secret['data']
+                        print('[DEBUG] - DADOS DA ATUALIZAÇÃO') if debug_mode else 0
+                        print(environment_data['secret_data']) if debug_mode else 0
+
+                        write_secret(environment_data, 'secret/' + secret['name'], client)
+
+                    elif opt == 2:
+                        policies = get_policies()
+                        policy_write(vault_data[environment_name], secret_name, client, policies)
+                    
+                    elif opt == 3:
+                        field_name = input('Informe o nome do campo a ser removido:')
+                        if get_yes_or_no('O campo ' + field_name + ' (' + secret['data'][field_name]  + ') será removido.\nConfirmar?' ):
+                            if field_name in secret['data']:
+                                secret['data'].pop(field_name, None)
+                                environment_data['secret_data'] = secret['data']
+                                write_secret(environment_data, 'secret/' + secret['name'], client)
+                            else:
+                                print('A chave informada não está presente na secret')
+
+                    print('\n[INFO] - Atualização da secret concluída!\n')
+
+                    secret = read_secret(environment_name, secret_name)
+                    print_formatted_secret_data(environment_name, secret_name, secret['data'])
+
+                    policy_rules = policy_read(environment_name, secret_name + '-policy')
+                    print_formatted_policy_data(secret_name + '-policy', policy_rules)
+
+        except Exception as err:
+            print('Falha ao executar comando no Vault:', err)
+            pass
+    except Exception:
+        print('[ERRO] - Não foi possível realizar a atualização da secret')
+        pass
+
+
+def list_secret_facade(targets):
+    global vault_data
+    global kps_file
+
+    try:
+        if kps_file != '': 
+            get_token_input_method(targets)
+        else:
+            insert_vault_tokens(targets)
+                
+        try:
+            print(""""""+clear+"""\n=======================================================================
+                    Resultado da listagem de secrets """)
+            
+            for environment_name, environment_data in vault_data.items():
+                if environment_data['use']:
+                    client = hvac.Client(
+                        url= vault_data[environment_name]['url'],
+                        token=vault_data[environment_name]['token']
+                    )
+                    print("\n[" + environment_name + "]\n")
+                    for secret in client.list('secret/')['data']['keys']:
+                        try:
+                            print(secret)
+                        except Exception:
+                            print('Dados não encontrados...')
+                    
+                    if get_yes_or_no('\nDeseja visualizar detalhes de alguma secret de ' + environment_name + '?', 'n'):
+                        secret_name = input('Informe o nome da secret:')
+
+                        secret = read_secret(environment_name, secret_name)
+                        print_formatted_secret_data(environment_name, secret_name, secret['data'])
+
+                        print("\n\nPressione alguma tecla para continuar...")
+                        getpass.getpass(' ')
+                        print(clear)
+
+        except Exception as err:
+            print('Falha ao executar comando no Vault:', err)
+
+    except Exception:
+        print('[ERRO] - Não foi possível realizar a listagem das secrets')
+        pass
 
 
 ######### VAULT API OPERATIONS #########
 
-def post_secret(post_data, post_secret_name, client):
+def read_secret(environment_name, secret_name):
+    client = hvac.Client(
+                url= vault_data[environment_name]['url'],
+                token=vault_data[environment_name]['token']
+            )
+            
+    try:
+        data = client.read('secret/'+secret_name)['data']
+        return {'name': secret_name, 'data' : data}
+
+    except Exception:
+        print('\n[INFO] - A secret informada não foi encontrada no ambiente de ' + environment_name)
+        pass
+
+
+def write_secret(post_data, post_secret_name, client):
     url = post_data['url'] + '/v1/'  + post_secret_name
     payload = json.dumps(post_data['secret_data'], ensure_ascii=False)
     print('[DEBUG] - PAYLOAD DUMP') if debug_mode else 0
@@ -411,15 +476,22 @@ def post_secret(post_data, post_secret_name, client):
 
     try:
         response = requests.post(url, data=payload, headers=headers)
-        print('[+INFO] ', response) if verbose_mode else 0
-        print('[+INFO] ', response.json() ) if verbose_mode else 0
-    except Exception as e:
-        print('[DEBUG] - REQUEST DUMP') if debug_mode else 0
-        print('\n[DEBUG] - PAYLOAD') if debug_mode else 0
-        print(payload) if debug_mode else 0
-        print('[ERROR] - Erro ao enviar request para o vault: ' + str(e))
+        if verbose_mode:
+            print('[+INFO] ', response) 
+            print('[+INFO] ', response.json() )
+        
+        return True
 
-def post_policy(post_data, post_secret_name, client, policies):
+    except Exception as e:
+        if debug_mode:
+            print('\n[DEBUG] - PAYLOAD')
+            print(payload)
+
+        print('[ERROR] - Erro ao enviar request para o vault: ' + str(e))
+        pass
+
+
+def policy_write(post_data, post_secret_name, client, policies):
     policy_name = post_secret_name.replace('secret/','') + '-policy'
 
     policy = ""
@@ -452,11 +524,54 @@ path "aws/sts/""" + aws_s3_role + """\" {
             name=policy_name,
             policy=policy,
         )
-    except Exception as e:
-        print(e)
-    print('[+INFO] Policy gerada') if verbose_mode else 0
 
-def generate_token(post_data, post_secret_name, client):
+        print('[+INFO] Policy gerada') if verbose_mode else 0
+        return True
+
+    except Exception as e:
+        print('[ERROR] - Erro ao enviar request para o vault: ' + e)
+        
+
+def policy_read(environment_name, policy_name):
+    try:
+        client = hvac.Client(url= vault_data[environment_name]['url'],
+                            token=vault_data[environment_name]['token'])
+
+        policy_rules = client.sys.read_policy(name=policy_name)['data']['rules']
+        return policy_rules
+
+    except Exception as e:
+        print('[INFO] - Não foi encontrada nenhuma policy para esta secret: ' + e)
+        pass
+
+
+def policy_list(environment_name):
+    try:
+        client = hvac.Client(url= vault_data[environment_name]['url'],
+                            token=vault_data[environment_name]['token'])
+
+        list_policies_resp = client.sys.list_policies()['data']['policies']
+        return list_policies_resp
+
+    except Exception as e:
+        print('[ERROR] - Erro ao enviar request para o vault: ' + e)
+        pass
+
+
+def policy_delete(environment_name, policy_name):
+    try:
+        client = hvac.Client(url= vault_data[environment_name]['url'],
+                            token=vault_data[environment_name]['token'])
+
+        client.sys.delete_policy(name=policy_name)
+        return True
+
+    except Exception as e:
+        print('[ERROR] - Erro ao enviar request para o vault: ' + e)
+        pass
+
+
+def token_create(post_data, post_secret_name, client):
     policy_name = post_secret_name.replace('secret/','') + '-policy'
     token_name = post_secret_name.replace('secret/','') + '-token'
 
@@ -466,7 +581,7 @@ def generate_token(post_data, post_secret_name, client):
         "policies": [
             policy_name
         ],
-        "ttl": "8760h",
+        "ttl": "43800h",
         "renewable": True,
         "display_name" : token_name
     }, ensure_ascii=False) 
@@ -475,25 +590,19 @@ def generate_token(post_data, post_secret_name, client):
 
     try:
         response = requests.post(url, data=payload, headers=headers)
-        print('[+INFO] Token gerado ', response ) if verbose_mode else 0
-        print('[+INFO] ', response.json() ) if verbose_mode else 0
         post_data['client_token'] = response.json()['auth']['client_token']
 
+        if verbose_mode:
+            print('[+INFO] Token gerado ', response )
+            print('[+INFO] ', response.json() ) 
+
+        return True
+        
     except Exception as e:
         print('[ERROR] - Erro ao enviar request para o vault: ' + str(e))
 
 
-####### DRAWING MENUS ########
-
-def print_tokens():
-    print(""""""+clear+"""\n=======================================================================
-                Geração de token(s) concluída: """)
-
-    for key, value in vault_data.items():
-        if value['use']:
-            print('\nToken para ' + key + ': ' + value['client_token'])
-    print("\n\nPressione alguma tecla para continuar...")
-    getpass.getpass(' ')
+####### PRINTING FUNCTIONS ########
 
 def print_env_pick_menu(headline):
     i=2
@@ -510,78 +619,136 @@ def print_env_pick_menu(headline):
         Digite 0 para sair\n""")
     return i
 
+
+def print_formatted_secret_data(environment_name, secret_name, data):
+    print("""\n====================================================
+            Dados da Secret em """ + environment_name + """
+====================================================
+
+    Os dados da secret """ + secret_name + """ são:\n""")
+    for key, value in data.items():
+        print("\t" + key + " : " + value)
+
+
+def print_formatted_policy_data(policy_name, policy_rules):
+    print('\n\n    Regras da policy \'' + policy_name +'\':\n\t' + policy_rules)
+
+
+def print_tokens():
+    print(""""""+clear+"""\n=======================================================================
+                Geração de token(s) concluída: """)
+
+    for key, value in vault_data.items():
+        if value['use']:
+            print('\nToken para ' + key + ': ' + value['client_token'])
+    print("\n\nPressione alguma tecla para continuar...")
+    getpass.getpass(' ')
+
+
+####### MENUS ########
+
+def read_secret_menu():
+    global kps_file
+
+    try:
+        if kps_file != '':  
+            get_token_input_method(vault_data.keys())
+        else:
+            insert_vault_tokens(vault_data.keys())
+
+        secret_name = input('Informe o nome da secret:')
+        print(clear)
+
+        for environment_name in vault_data.keys():
+            secret = read_secret(environment_name, secret_name)                
+            print_formatted_secret_data(environment_name, secret_name, secret['data'])
+            policy_data = policy_read(environment_name, secret_name + '-policy')
+            print_formatted_policy_data(secret_name + '-policy', policy_data)
+
+    except Exception:
+        print('[ERRO] - Não foi possível realizar a leitura da secret')
+        pass
+
+
 def create_secret_menu():
     headline = """
-# ====================== PASSO 1 =========================== #
+==============================================================
     Informe os ambientes onde as chaves serão criadas:\n"""
 
     max_opt = print_env_pick_menu(headline)
 
-    opt = get_numeric(0, max_opt + 1)
+    opt = get_option(0, max_opt + 1)
     
     print('[INFO] - Opção ' + str(opt) + ' selecionada') if verbose_mode else 0
     if opt == 0:
         sys.exit(0)
     elif opt == 1:
-        create_secret(vault_data.keys())
+        create_secret_facade(vault_data.keys())
     elif opt >= 2 and opt < max_opt:
-        create_secret([list(vault_data.keys())[opt-2]])
+        create_secret_facade([list(vault_data.keys())[opt-2]])
     elif opt == max_opt:
         main()
 
+
 def update_secret_menu():
     headline = """
-# ====================== PASSO 1 =========================== #
+==============================================================
     Informe os ambientes onde as secrets serão atualizadas:\n"""
 
     max_opt = print_env_pick_menu(headline)
-    opt = get_numeric(0, max_opt + 1)
+    opt = get_option(0, max_opt + 1)
     
     print('[INFO] - Opção ' + str(opt) + ' selecionada') if verbose_mode else 0
     if opt == 0:
         sys.exit(0)
     elif opt == 1:
-        update_secret(vault_data.keys())
+        update_secret_facade(vault_data.keys())
     elif opt >= 2 and opt < max_opt:
-        update_secret([list(vault_data.keys())[opt-2]])
+        update_secret_facade([list(vault_data.keys())[opt-2]])
     elif opt == max_opt:
         main()
 
 
 def list_secret_menu():
     headline = """
-# ====================== PASSO 1 =========================== #
+==============================================================
     Informe os ambientes que deseja consultar:\n"""
 
     max_opt = print_env_pick_menu(headline)
-    opt = get_numeric(0, max_opt + 1)
+    opt = get_option(0, max_opt + 1)
     
     print('[INFO] - Opção ' + str(opt) + ' selecionada') if verbose_mode else 0
     
     if opt == 0:
         sys.exit(0)
     elif opt == 1:
-        list_secret(vault_data.keys())
+        list_secret_facade(vault_data.keys())
     elif opt >= 2 and opt < max_opt:
-        list_secret([list(vault_data.keys())[opt-2]])
+        list_secret_facade([list(vault_data.keys())[opt-2]])
     elif opt == max_opt:
         main()
 
-def main():
-    initialize_vault_data()
-    print(clear)
+def main_menu(more):
 
-    global debug_mode
-    global verbose_mode
+    options = ''
 
-    for arg in sys.argv[1:]:
-        if arg == '-d':
-            debug_mode = True
-        elif arg == '-v':
-            verbose_mode = True
-
-    if debug_mode:
-        print('\n\n\n*******    EXECUTANDO APLICAÇÃO EM MODO DEBUG    *******')
+    if not more:
+        options = """
+           Digite 1 para criar uma nova secret          
+           Digite 2 para consultar uma secret
+           Digite 3 para atualizar uma secret 
+           Digite 4 para listar as secrets 
+           Digite 5 para mais opções
+           
+           Digite 0 para sair"""
+    
+    else:
+        options = """
+           Digite 5 para recriar um token
+           Digite 6 para revogar um token
+           Digite 7 para renovar um token
+           Digite 9 para voltar ao menu anterior
+           """
 
     print("""\
 
@@ -600,23 +767,56 @@ def main():
                                         v 1.0
 
 ==========================================================
-    Selecione a opção desejada:\n
-           Digite 1 para criar uma nova secret          
-           Digite 2 para atualizar uma secret 
-           Digite 3 para listar as secrets
-           Digite 0 para sair """)
-
-    opt = get_numeric(0,4)
+    
+    Selecione a opção desejada:\n""" + options)
+    
+    min_opt = 0 if not more else 5
+    max_opt = 6 if not more else 10
+    opt = get_option(min_opt, max_opt)
     
     print('[INFO] - Opção ' + str(opt) + ' selecionada') if verbose_mode else 0
-    if opt == 0:
-        sys.exit(0)
-    elif opt == 1:
-        create_secret_menu()
-    elif opt == 2:
-        update_secret_menu()
-    elif opt == 3:
-        list_secret_menu()
+    if not more:
+        if opt == 0:
+            sys.exit(0)
+        elif opt == 1:
+            create_secret_menu()
+        elif opt == 2:
+            read_secret_menu()
+        elif opt == 3:
+            update_secret_menu()
+        elif opt == 4:
+            list_secret_menu()
+        elif opt == 5:
+            print(clear)
+            main_menu(not more)
+
+    else:
+        if opt == 5:
+            print('[WIP] - Recriar token')
+        elif opt == 6:
+            print('[WIP] - Revogar token')
+        elif opt == 7:
+            print('[WIP] - Renovar token')
+        elif opt == 9:
+            print(clear)
+            main_menu(not more)
+
+def main():
+    initialize_vault_data()
+    print(clear)
+
+    global debug_mode
+    global verbose_mode
+
+    for arg in sys.argv[1:]:
+        if arg == '-d':
+            debug_mode = True
+        elif arg == '-v':
+            verbose_mode = True
+
+    print('\n\n\n*******    EXECUTANDO APLICAÇÃO EM MODO DEBUG    *******') if debug_mode else 0
+
+    main_menu(False)
     
     if get_yes_or_no('\nDeseja continuar a execução?'):
         main()
