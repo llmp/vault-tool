@@ -1,4 +1,4 @@
-# VAUL TOOL
+# VAULT TOOL
 
 Uso
 -----
@@ -9,7 +9,6 @@ Pré-requisitos
 1 - Python v.3.x.x
 2 - Keepass
 3 - KPScript (compatível com a versão do Keepass)
-4 - Permissão de acesso ao diretório de rede de Seguran�a da Informação
 
 Instalação
 -----
