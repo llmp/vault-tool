@@ -1,6 +1,7 @@
 # The path to the (optional) KeyPass install folder
 # settign this parameter will enable the option to use the keepass when prompted for the vault tokens
 kps_path: ''
+kps_writeback_group: ''
 aws_s3_role: ''
 aws_dynamo_role: ''
 
@@ -10,3 +11,5 @@ vault_envs:
   Vault - DEV: 'http://my-dev-vault:8200'
 #   Vault - QA: 'http://my-qa-vault:8200'
 #   Vault - PROD: 'http://my-prod-vault:8200'
+
+vault_key_quorum: 5

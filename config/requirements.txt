@@ -1,4 +1,4 @@
-libkeepass
+pykeepass
 requests
 hvac
 pyyaml
