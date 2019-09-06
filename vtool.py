@@ -28,11 +28,14 @@ secret_name = 'secret/'
 yaml_params = yaml.load(open('.\\config\\config.yaml', 'r', encoding="utf-8"), Loader=yaml.SafeLoader)
 
 kps_file = yaml_params['kps_path']
+kps_writeback_group = yaml_params['kps_writeback_group']
+kps_writeback_history_group = yaml_params['kps_writeback_history_group']
+
 vault_envs = yaml_params['vault_envs']
+vault_key_quorum = yaml_params['vault_key_quorum']
+
 aws_s3_role = yaml_params['aws_s3_role']
 aws_dynamo_role = yaml_params['aws_dynamo_role']
-vault_key_quorum = yaml_params['vault_key_quorum']
-kps_writeback_group = yaml_params['kps_writeback_group']
 
 vault_data = { }
 debug_mode = False
@@ -59,8 +62,6 @@ def initialize_vault_data():
         vault_data[key]['secret_data'] = dict()
         vault_data[key]['use'] = False
 
-    print(vault_data) if verbose_mode else 0
-
 
 def clear_cache():
     initialize_vault_data()
@@ -82,7 +83,7 @@ def read_keepass_data(entry_name, field_name, kps_passwd=''):
         read_keepass_data(entry_name, field_name, '')
         
 
-def write_token_data(entry_name, kps_group, token_data, kps_pswd):
+def write_token_data(entry_name, kps_group, token_data, kps_pswd, history_group=None):
     try:
         kp = PyKeePass(kps_file, password=kps_pswd)
         entry = kp.find_entries(title=entry_name, first=True)
@@ -99,16 +100,27 @@ def write_token_data(entry_name, kps_group, token_data, kps_pswd):
                 except:
                     pass
 
+
+            for updated_environment in token_data.keys():
+                if history_group:
+                    if updated_environment == history_group:
+                        entry.notes = updated_notes
+                        entry.expiry_time = datetime.now() + timedelta(days=365)
+                        entry.expires = True
+
+                else:
+                    entry.notes = updated_notes
+                    entry.expiry_time = datetime.now() + timedelta(days=365)
+                    entry.expires = True
+
+
             for current_env_name, current_env_token in current_envs.items():
                 if current_env_name not in token_data.keys():
                     token_data.update({ current_env_name : current_env_token })
 
-            for new_env_name, new_env_token in token_data.items():
-                updated_notes += new_env_name + ': ' + new_env_token + '\n'
-            
-            entry.notes = updated_notes
-            entry.expiry_time = datetime.now() + timedelta(days=365)
-            entry.expires = True
+               
+            for env_name, env_token in token_data.items():
+                updated_notes += env_name + ': ' + env_token + '\n'
 
         else:
             group = kp.find_groups(name=kps_group, first=True)
@@ -140,12 +152,12 @@ def get_secret_name():
 def get_policies():
     redo = True
     policies = dict()
-
+    
     while redo:
         print("""\
 """+clear+"""==============================================================\n
     Informe uma policy para ser adicionada ao token:\n
-           Digite 1 para leitura da secret (default)
+           Digite 1 para acesso à secret (default)
            Digite 2 para acesso ao S3 (Amazon)
            Digite 3 para acesso ao Dynamo (Amazon)
            Digite 4 para retornar ao menu principal
@@ -265,7 +277,7 @@ Informe agora os conjuntos de chaves e valores para o ambiente """ + environment
     while True:
         
         try:
-            key = get_input('Chave ' + str(i) + ': ')
+            key = get_input('Chave ' + str(i) + ': ', False, False)
             if key != '':
                 val = get_input('Valor ' + str(i) + ': ')
                 secret_keys_pairs[key] = val
@@ -369,7 +381,7 @@ def get_vault_tokens(opt, kps_pwsd=''):
     return kps_pwsd
 
 
-def get_input(message, hidden=False):
+def get_input(message, hidden=False, verify_empty=True):
     redo = True
     value = ''
     while redo:
@@ -377,7 +389,7 @@ def get_input(message, hidden=False):
             value = getpass.getpass(message)
         else:
             value = quote(input(message)).replace('\'','')
-        if value != '':
+        if  not verify_empty or value != '':
             redo = False
         else:
             print('[ERRO] - O valor informado está vazio, tente novamente\n')
@@ -431,7 +443,7 @@ def create_secret_facade(redo, kps_pswd=''):
 
                 print('Gravando dados para %s, aguarde...' % token_entry)
                 try:
-                    write_token_data(token_entry, kps_writeback_group, tokens, kps_pswd)
+                    write_token_data(token_entry, kps_writeback_group, tokens, kps_pswd, kps_writeback_history_group)
                     print('\n[INFO] - Dados para %s gravados com sucesso' % token_entry)
                 except Exception as e:
                     print('Erro na gravação dos dados de %s : %s' % (token_entry, str(e)) )
@@ -513,7 +525,7 @@ def update_secret_facade():
 
                 elif opt == 2:
                     policies = get_policies()
-                    policy_write(vault_data[environment_name], secret_name, policies)
+                    policy_write(vault_data[environment_name], 'secret/' + secret_name, policies)
                 
                 elif opt == 3:
                     field_name = get_input('Informe o nome do campo a ser removido:')
@@ -729,7 +741,7 @@ def policy_write(post_data, post_secret_name, policies):
     try:
         for policy_type, capabilities in policies.items():
             if  i != 0 :
-                policy += ','
+                policy += '\n'
 
             capabilities_str = ''
 
@@ -750,7 +762,7 @@ path \"""" + post_secret_name + """\" {
                 policy += """
 path "aws/sts/""" + aws_dynamo_role + """\" {
     capabilities = [
-        "update"
+        "read", "update"
     ]
 }"""
 
@@ -758,7 +770,7 @@ path "aws/sts/""" + aws_dynamo_role + """\" {
                 policy += """
 path "aws/sts/""" + aws_s3_role + """\" {
     capabilities = [
-        "update"
+        "read", "update"
     ]
 }"""    
             i += 1
@@ -986,7 +998,7 @@ def read_secret_menu():
         print(clear)
 
         for environment_name in vault_data.keys():
-            secret = read_secret(environment_name, secret_name)                
+            secret = read_secret(environment_name, secret_name)
             print_formatted_secret_data(environment_name, secret_name, secret['data'])
             policy_data = policy_read(vault_data[environment_name]['url'], vault_data[environment_name]['token'], secret_name + '-policy')
             print_formatted_policy_data(secret_name + '-policy', policy_data)
@@ -1237,7 +1249,7 @@ def main():
 
     main_menu(False)
     
-    if get_yes_or_no('\nDeseja continuar a execução?'):
+    if  get_yes_or_no('\nDeseja continuar a execução?'):
         main()
     else:
         sys.exit(0)

@@ -1,0 +1,9 @@
+#Number of keys required to use 
+vault_key_quorum: 5
+
+# Vault environments
+# list the names and addressess of the vault environments you're using
+vault_envs:
+  Vault - TI: ''
+  Vault - QA: ''
+  Vault - PROD: ''

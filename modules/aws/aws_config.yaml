@@ -1,0 +1,3 @@
+# AWS settings
+aws_s3_role: 's3'
+aws_dynamo_role: 'dynamo'
