@@ -61,11 +61,21 @@ class Vtool(object):
                 self.vault_servers = self.credentials.get_x_vault_tokens(selected_env, self.vault_servers)
                 self.create_secret_menu()
             except Exception as e:
-                    print('[ERRO] - Não foi possível criar a secret: %s' % str(e))
+                print('[ERRO] - Não foi possível criar a secret: %s' % str(e))
         elif option == 2:
-            self.view.read_secret_menu() #read
+            try:
+                selected_env = self.view.environment_selection_menu(self.vault_servers.keys())
+                self.vault_servers = self.credentials.get_x_vault_tokens(selected_env, self.vault_servers)
+                self.read_secret_menu()
+            except Exception as e:
+                print('[ERRO] - Não foi possível ler a secret: %s' % str(e))
         elif option == 3:
-            self.view.update_secret_menu() #update
+            try:
+                selected_env = self.view.environment_selection_menu(self.vault_servers.keys())
+                self.vault_servers = self.credentials.get_x_vault_tokens(selected_env, self.vault_servers)
+                self.update_secret_menu()
+            except Exception as e:
+                print('[ERRO] - Não foi possível ler a secret: %s' % str(e))
         elif option == 4:
             self.view.list_secret_menu() #list
         elif option == 5:
@@ -86,13 +96,9 @@ class Vtool(object):
         try:
             secret_name = self.view.get_secret_name()
             aws_client = self.set_aws_params()
-            secret = vault.vault_secret.Secret(secret_name=secret_name)
+            secret = vault.vault_secret.Secret(name=secret_name)
 
             for environment_name, environment_data in self.vault_servers.items():
-
-                print(environment_name)
-                print(environment_data.use)
-
                 if environment_data.use:
                     
                     secret.secret_data = self.view.get_keys(environment_name)
@@ -101,14 +107,61 @@ class Vtool(object):
 
                     if self.view.confirm_environment_change(environment_name):
                         policies = self.view.get_policies()
-                        vault.vault_api.write_secret(environment_data.url,environment_data.x_vault_token, secret.secret_data, secret.secret_name)
+                        vault.vault_api.write_secret(environment_data.url,environment_data.x_vault_token, secret.data, secret.name)
                         vault.vault_api.policy_write(environment_data.url, environment_data.x_vault_token, secret_name,policies, aws_client.s3_role, aws_client.dynamo_role)
                         self.vault_servers[environment_name].client_token = vault.vault_api.token_create(environment_data.url, environment_data.x_vault_token, secret_name)
                         
             self.view.print_tokens(self.vault_servers)
                         
         except Exception as e:
-            print(e)
+            raise(e)
+
+    def read_secret_menu(self):
+        try:
+            secret_name = self.view.get_secret_name()
+            for environment_name, environment_data in self.vault_servers.items():
+                if environment_data.use:
+                    secret = vault.vault_api.read_secret(environment_data.url, environment_data.x_vault_token, secret_name)
+                    self.view.print_formatted_secret_data(environment_name, secret_name, secret['data'])
+        except Exception as e:
+            raise(e)
+
+
+    def update_secret_menu(self):
+        try:
+            secret_name = self.view.get_secret_name()
+            for environment_name, environment_data in self.vault_servers.items():
+                if environment_data.use:
+                    secret = vault.vault_api.read_secret(environment_data.url, environment_data.x_vault_token, secret_name)
+                    self.view.print_formatted_secret_data(environment_name, secret_name, secret['data'])
+                    policy = vault.vault_api.policy_read(environment_data.url, environment_data.x_vault_token, secret_name)
+                    self.view.print_formatted_policy_data(secret_name, policy)
+
+                    option = self.view.update_action_menu()
+
+                    if option == 0:
+                        self.main()
+
+                    elif option == 1:
+                        secret = self.view.get_field_updates(secret)
+                        vault.vault_api.write_secret(environment_data.url,environment_data.x_vault_token, secret['data'], secret['name'])
+                    
+                    elif option == 2:
+                        aws_client = self.set_aws_params()
+                        policies = self.view.get_policies()
+                        vault.vault_api.policy_write(environment_data.url, environment_data.x_vault_token, secret_name, policies, aws_client.s3_role, aws_client.dynamo_role)
+                    
+                    elif option == 3:
+                        secret = self.view.get_removed_field(secret)
+                        vault.vault_api.write_secret(environment_data.url,environment_data.x_vault_token, secret['data'], secret['name'])
+                    
+                    secret = vault.vault_api.read_secret(environment_data.url, environment_data.x_vault_token, secret_name)
+                    policy = vault.vault_api.policy_read(environment_data.url, environment_data.x_vault_token, secret_name)
+                    secret = vault.vault_secret.Secret(secret['name'], secret['data'])
+                    self.view.print_all_secret_data(environment_name, secret, policy)
+                    
+        except Exception as e:
+            raise(e)
 
 
 if __name__ == '__main__':

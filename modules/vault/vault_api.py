@@ -88,8 +88,9 @@ path "aws/sts/""" + aws_s3_role + """\" {
         raise(e)
 
 
-def policy_read(url, x_vault_token, policy_name):
+def policy_read(url, x_vault_token, secret_name):
     try:
+        policy_name = secret_name + '-policy'
         client = hvac.Client(url=url,token=x_vault_token)
         policy_rules = client.sys.read_policy(name=policy_name)['data']['rules']
         return policy_rules

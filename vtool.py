@@ -495,7 +495,7 @@ def update_secret_facade():
                         if old_field_name in secret['data'] and get_yes_or_no('\nDeseja alterar o nome do campo?', 'n'):    
                             new_field_name = get_input('\nInforme o nome novo para o campo:')
                         else:
-                            new_field_name = old_field_name                        
+                            new_field_name = old_field_name
                             
                         new_field_value = get_input('\nInforme o valor novo do campo:')
                         if get_yes_or_no('\nConfirmar atualização?'):
@@ -537,7 +537,7 @@ def update_secret_facade():
                         else:
                             print('[INFO] - A chave informada não está presente na secret')
                 print("""\n====================================================
-              RESULTADO DA ATUALIZAÇÃO""")
+              DADOS DA SECRET""")
                 secret = read_secret(environment_name, secret_name)
                 print_formatted_secret_data(environment_name, secret_name, secret['data'])
                 policy_rules = policy_read(vault_data[environment_name]['url'],vault_data[environment_name]['token'], secret_name + '-policy')
@@ -995,7 +995,6 @@ def read_secret_menu():
         get_vault_tokens(1)    
 
         secret_name = get_input(clear + 'Informe o nome da secret:')
-        print(clear)
 
         for environment_name in vault_data.keys():
             secret = read_secret(environment_name, secret_name)

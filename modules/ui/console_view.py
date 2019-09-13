@@ -31,7 +31,7 @@ class Console(object):
                ██║   ██║   ██║██║   ██║██║      
                ██║   ╚██████╔╝╚██████╔╝███████╗ 
                ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝ 
-                                      v 2.0 by Leo Molina
+                                       v2.0 by Leo Molina
 ==========================================================
     Selecione a opção desejada:
 
@@ -76,10 +76,10 @@ class Console(object):
     def x_vault_token_input_method(self):
         print("""\
                 """+self.clear+"""
-    ==================================================================\n
-    É necessário buscar o token do Vault para realizar esta operação\n
-        Digite 1 para buscar o token no KeePass
-        Digite 2 para inserir o token manualmente\n""")
+==================================================================\n
+É necessário buscar o token do Vault para realizar esta operação\n
+    Digite 1 para buscar o token no KeePass
+    Digite 2 para inserir o token manualmente\n""")
 
         return validations.get_option(1,3)
 
@@ -97,8 +97,7 @@ class Console(object):
         i=2
         print("""\
     """+ self.clear +"""
-    ==============================================================
-
+==============================================================
     Informe os ambientes onde deseja executar a operação
         Digite 1 para todos os ambientes          """)
         for key in environment_names:
@@ -159,6 +158,10 @@ Informe agora os conjuntos de chaves e valores para o ambiente """ + environment
     Os dados da secret """ + secret_name + """ são:\n""")
         for key, value in data.items():
             print("\t" + key + " : " + value)
+
+    def print_formatted_policy_data(self, secret_name, policy_rules):
+        policy_name = secret_name + '-policy'
+        print('\n\n    Permissões da policy \'' + policy_name +'\':\n\t' + policy_rules)
 
     def read_secret_menu(self, environment_names):
         pass
@@ -286,6 +289,73 @@ Informe agora os conjuntos de chaves e valores para o ambiente """ + environment
         else:
             capabilities.append('update')
         return capabilities
+
+    def update_action_menu(self):
+        print("""\n==================================================================
+    Informe o tipo de atualização a ser realizado:
+
+        Digite 1 para atualizar um campo
+        Digite 2 para atualizar as policies
+        Digite 3 para remover um campo
+
+        Digite 0 para voltar ao menu inicial
+                    """)
+
+        opt = validations.get_option(1,5)
+        return opt
+
+    def get_field_updates(self, secret):
+        print("""\n\n============================================================================================================
+    Durante a atualização das chaves e valores, tanto o nome quanto o valor do campo podem ser sobrescritos
+    Para inserir um par novo, informe o nome de um campo não existente na secret
+=============================================================================================================\n\n""")
+
+        new_field_name = ''
+        changes = dict()
+        redo = True
+
+        while redo:
+            old_field_name = validations.get_input('Informe o nome do campo a ser atualizado:')                
+
+            if old_field_name in secret['data'] and validations.get_yes_or_no('\nDeseja alterar o nome do campo?', 'n'):    
+                new_field_name = validations.get_input('\nInforme o nome novo para o campo:')
+            else:
+                new_field_name = old_field_name
+
+            new_field_value = validations.get_input('\nInforme o valor novo do campo:')
+            if validations.get_yes_or_no('\nConfirmar atualização?'):
+                changes[old_field_name] = { 'new_name': new_field_name, 'new_value': new_field_value}
+            else:
+                break
+
+            redo = validations.get_yes_or_no('\nDeseja atualizar mais alguma chave?','n')
+
+        for old_key, key_pair in changes.items():
+
+            if old_key in secret['data']:
+                if old_key == key_pair['new_name']:
+                    secret['data'][old_key] = key_pair['new_value']
+                else:
+                    secret['data'].pop(old_key, None)
+                    secret['data'][key_pair['new_name']] = key_pair['new_value']
+            else:
+                secret['data'][key_pair['new_name']] = key_pair['new_value']
+                    
+        return secret
+
+    def get_removed_field(self, secret):
+        field_name = validations.get_input('Informe o nome do campo a ser removido:')
+        if validations.get_yes_or_no('O campo ' + field_name + ' (' + secret['data'][field_name]  + ') será removido.\nConfirmar?' ):
+            if field_name in secret['data']:
+                secret['data'].pop(field_name, None)
+            else:
+                print('[INFO] - A chave informada não está presente na secret')    
+        return secret
+                
+    def print_all_secret_data(self, environment_name, secret, policy):
+        self.print_formatted_secret_data(environment_name, secret.name, secret.data)
+        self.print_formatted_policy_data(secret.name, policy)
+        getpass.getpass('\n\nPressione alguma tecla para continuar...')
 
     def get_yes_or_no(self, message, valid='s'):
         return validations.get_yes_or_no(message, valid)

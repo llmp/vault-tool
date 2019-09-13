@@ -1,8 +1,8 @@
 # The path to the (optional) KeyPass install folder
 # settign this parameter will enable the option to use the keepass when prompted for the vault tokens
-kps_path: '\path\to\keepass'
-kps_writeback_group: 'Group_Name'
-kps_writeback_history_group: 'Vault - DESENV'
+kps_path: ''
+kps_writeback_group: 'History'
+kps_writeback_history_group: 'Vault - PROD'
 
 # AWS settings
 aws_s3_role: 's3'
@@ -14,4 +14,5 @@ vault_key_quorum: 3
 # Vault environments
 # list the names and addressess of the vault environments you're using
 vault_envs:
-  Vault - DESENV: ''
+  Vault - PROD: ''
+'

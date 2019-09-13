@@ -1,5 +1,5 @@
 # The path to the (optional) KeyPass install folder
 # setting this parameter will enable the option to use the keepass when prompted for the vault tokens
-kps_path: '\path'
-kps_writeback_group: 'History_Group'
-kps_writeback_history_groups: ['Vault - DESENV']
+kps_path: ''
+kps_writeback_group: 'History'
+kps_writeback_history_groups: ['Vault - PROD']
